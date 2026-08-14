@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.2.12](https://github.com/ThairaHub/aionrs/compare/v0.2.11...v0.2.12) (2026-08-14)
+
+
+### Features
+
+* **tui:** add codex-style interactive repl ([f00f0fb](https://github.com/ThairaHub/aionrs/commit/f00f0fbc15842cf5a4443ee92d5f7269d4cb516f))
+* **tui:** add interactive repl interface ([4ffa967](https://github.com/ThairaHub/aionrs/commit/4ffa967b26a0b479113cfdfc2cda94d510ee4640))
+* **tui:** complete codex-style repl workflow ([6a91939](https://github.com/ThairaHub/aionrs/commit/6a91939164b0afa079eb9289a46511bb3b12146f))
+
 ## [0.2.11](https://github.com/iOfficeAI/aionrs/compare/v0.2.10...v0.2.11) (2026-08-13)
 
 
