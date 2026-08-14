@@ -1,0 +1,110 @@
+name: Sync Upstream
+
+# Keeps this mirror current with iOfficeAI/aionrs without ever landing their
+# changes in a Thaira build unreviewed.
+#
+#   - new upstream TAGS are pushed here directly. Tags are immutable pointers and
+#     nothing builds from them until AIONRS_VERSION in thairaai-code is bumped,
+#     so having them available is useful and cannot change any existing build.
+#   - new upstream COMMITS on main open a PR. Never auto-merged: the whole point
+#     of this mirror is that upstream cannot silently alter what we ship.
+#
+# Why a mirror and not a GitHub fork: forks do not auto-update either, cannot be
+# made private later, and make `gh` ambiguous about which repo it is acting on.
+
+on:
+  schedule:
+    # Mondays 06:17 UTC — off the hour to avoid the top-of-hour scheduler crush.
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+env:
+  UPSTREAM: https://github.com/iOfficeAI/aionrs.git
+
+jobs:
+  sync:
+    name: Check upstream for changes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout mirror
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Fetch upstream
+        run: |
+          git remote add upstream "$UPSTREAM"
+          git fetch upstream main --tags
+
+      - name: Push new upstream tags
+        id: tags
+        run: |
+          git ls-remote --tags origin \
+            | awk '{print $2}' | sed 's#refs/tags/##' | grep -v '\^{}$' | sort -u > /tmp/remote-tags
+          git tag -l | sort -u > /tmp/all-tags
+          NEW_TAGS=$(comm -13 /tmp/remote-tags /tmp/all-tags | tr '\n' ' ' | sed 's/ *$//')
+
+          if [ -z "$NEW_TAGS" ]; then
+            echo "No new upstream tags."
+            echo "new_tags=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "New tags: $NEW_TAGS"
+          # shellcheck disable=SC2086
+          git push origin $NEW_TAGS
+          echo "new_tags=$NEW_TAGS" >> "$GITHUB_OUTPUT"
+
+      - name: Open a PR when main has new commits
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEW_TAGS: ${{ steps.tags.outputs.new_tags }}
+        run: |
+          BEHIND=$(git rev-list --count HEAD..upstream/main)
+          if [ "$BEHIND" -eq 0 ]; then
+            echo "main is up to date with upstream (new tags pushed: ${NEW_TAGS:-none})."
+            exit 0
+          fi
+
+          BRANCH="sync/upstream-$(date -u +%Y-%m-%d)"
+          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+            echo "$BRANCH already exists — a sync PR is already open for today."
+            exit 0
+          fi
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          # Merge rather than rebase: main carries this workflow, so it has
+          # deliberately diverged from upstream and must stay that way.
+          git merge --no-edit upstream/main || {
+            echo "::warning::Upstream merge hit conflicts — pushing the branch for manual resolution."
+            git merge --abort || true
+            git merge --no-commit --no-ff upstream/main || true
+          }
+          git push origin "$BRANCH"
+
+          {
+            echo "\`upstream/main\` is **$BEHIND commit(s)** ahead of this mirror."
+            echo
+            if [ -n "$NEW_TAGS" ]; then
+              echo "New tags pushed to this repo: \`$NEW_TAGS\`"
+              echo
+              echo "To ship one, bump \`AIONRS_VERSION\` in thairaai-code's \`_build-reusable.yml\`, then run this repo's **Release** workflow for that tag so the binaries exist here. Upstream frequently tags without attaching any."
+              echo
+            fi
+            echo "### Commits"
+            echo
+            git log --no-merges --pretty='- %h %s' HEAD~"$BEHIND"..HEAD | head -50
+            echo
+            echo "Review before merging — nothing upstream reaches a Thaira build until this lands and a release is built from it."
+          } > /tmp/pr-body.md
+
+          gh pr create \
+            --base main --head "$BRANCH" \
+            --title "chore: sync $BEHIND commit(s) from iOfficeAI/aionrs" \
+            --body-file /tmp/pr-body.md
