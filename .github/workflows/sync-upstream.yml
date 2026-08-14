@@ -109,25 +109,25 @@ jobs:
           } > /tmp/pr-body.md
 
           TITLE="chore: sync $BEHIND commit(s) from iOfficeAI/aionrs"
+          COMPARE="https://github.com/${GITHUB_REPOSITORY}/compare/main...${BRANCH}?expand=1"
 
-          if gh pr create --base main --head "$BRANCH" --title "$TITLE" --body-file /tmp/pr-body.md; then
-            exit 0
+          # The branch is already pushed, so the update is never lost. Opening a
+          # PR is best-effort: this org blocks Actions-authored PRs *and* issues
+          # ("Resource not accessible by integration"), which no workflow-level
+          # permissions block can override. Never fail the run over it — a red X
+          # would read as "sync broken" when the sync in fact succeeded.
+          if gh pr create --base main --head "$BRANCH" --title "$TITLE" --body-file /tmp/pr-body.md 2>/tmp/pr-err; then
+            echo "Opened a PR for $BRANCH."
+          else
+            echo "::warning::Could not open a PR automatically ($(head -1 /tmp/pr-err)). Branch $BRANCH is pushed — open it manually: $COMPARE"
           fi
 
-          # createPullRequest is blocked when the org disables Actions-authored
-          # PRs. The branch is already pushed, so surface it as an issue rather
-          # than failing the run and losing the signal entirely.
-          echo "::warning::Could not open a PR (org policy). Opening an issue with the compare link instead."
           {
+            echo "## Upstream sync available"
+            echo
+            echo "**$BEHIND commit(s)** from \`iOfficeAI/aionrs\`, merged onto \`$BRANCH\`."
+            echo
+            echo "[**Open the pull request →**]($COMPARE)"
+            echo
             cat /tmp/pr-body.md
-            echo
-            echo "---"
-            echo
-            echo "The branch \`$BRANCH\` is pushed. Open the PR here:"
-            echo "https://github.com/${GITHUB_REPOSITORY}/compare/main...${BRANCH}?expand=1"
-            echo
-            echo "_A PR could not be opened automatically: this org disables Actions-authored pull requests_"
-            echo "_(Settings → Actions → General → Workflow permissions). Enabling it makes this step open the PR directly._"
-          } > /tmp/issue-body.md
-
-          gh issue create --title "$TITLE" --body-file /tmp/issue-body.md
+          } >> "$GITHUB_STEP_SUMMARY"
