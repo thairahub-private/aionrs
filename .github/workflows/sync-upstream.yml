@@ -21,6 +21,10 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  # Fallback path: orgs commonly disable "Allow GitHub Actions to create and
+  # approve pull requests", which blocks createPullRequest regardless of the
+  # permissions above. Issue creation is not gated by that toggle.
+  issues: write
 
 env:
   UPSTREAM: https://github.com/iOfficeAI/aionrs.git
@@ -104,7 +108,26 @@ jobs:
             echo "Review before merging — nothing upstream reaches a Thaira build until this lands and a release is built from it."
           } > /tmp/pr-body.md
 
-          gh pr create \
-            --base main --head "$BRANCH" \
-            --title "chore: sync $BEHIND commit(s) from iOfficeAI/aionrs" \
-            --body-file /tmp/pr-body.md
+          TITLE="chore: sync $BEHIND commit(s) from iOfficeAI/aionrs"
+
+          if gh pr create --base main --head "$BRANCH" --title "$TITLE" --body-file /tmp/pr-body.md; then
+            exit 0
+          fi
+
+          # createPullRequest is blocked when the org disables Actions-authored
+          # PRs. The branch is already pushed, so surface it as an issue rather
+          # than failing the run and losing the signal entirely.
+          echo "::warning::Could not open a PR (org policy). Opening an issue with the compare link instead."
+          {
+            cat /tmp/pr-body.md
+            echo
+            echo "---"
+            echo
+            echo "The branch \`$BRANCH\` is pushed. Open the PR here:"
+            echo "https://github.com/${GITHUB_REPOSITORY}/compare/main...${BRANCH}?expand=1"
+            echo
+            echo "_A PR could not be opened automatically: this org disables Actions-authored pull requests_"
+            echo "_(Settings → Actions → General → Workflow permissions). Enabling it makes this step open the PR directly._"
+          } > /tmp/issue-body.md
+
+          gh issue create --title "$TITLE" --body-file /tmp/issue-body.md
